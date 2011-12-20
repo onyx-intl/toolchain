@@ -1,0 +1,177 @@
+Index: plugins/input-raw.c
+===================================================================
+--- plugins/input-raw.c	(revision 52)
++++ plugins/input-raw.c	(working copy)
+@@ -63,7 +63,7 @@
+ 		(ioctl(ts->fd, EVIOCGBIT(EV_ABS, sizeof(absbit) * 8), &absbit) >= 0) &&
+ 		(absbit & (1 << ABS_X)) &&
+ 		(absbit & (1 << ABS_Y)) && (absbit & (1 << ABS_PRESSURE)))) {
+-		fprintf(stderr, "selected device is not a touchscreen I understand\n");
++		printf("selected device is not a touchscreen I understand\n");
+ 		return -1;
+ 	}
+ 
+@@ -72,7 +72,7 @@
+ 	
+ 	if (i->grab_events == GRAB_EVENTS_WANTED) {
+ 		if (ioctl(ts->fd, EVIOCGRAB, (void *)1)) {
+-			fprintf(stderr, "Unable to grab selected input device\n");
++			printf("Unable to grab selected input device\n");
+ 			return -1;
+ 		}
+ 		i->grab_events = GRAB_EVENTS_ACTIVE;
+@@ -84,17 +84,26 @@
+ static int ts_input_read(struct tslib_module_info *inf,
+ 			 struct ts_sample *samp, int nr)
+ {
++    printf("ts_input_raw_read\n");
+ 	struct tslib_input *i = (struct tslib_input *)inf;
+ 	struct tsdev *ts = inf->dev;
+ 	struct input_event ev;
+ 	int ret = nr;
+ 	int total = 0;
+ 
++    if(i->sane_fd == -1)
++    {
++        printf("-1 directly.\n");
++    }
++
+ 	if (i->sane_fd == 0)
+ 		i->sane_fd = check_fd(i);
+ 
+ 	if (i->sane_fd == -1)
++    {
++        printf("return as i->sane_fd == -1\n");
+ 		return 0;
++    }
+ 
+ 	if (i->using_syn) {
+ 		while (total < nr) {
+@@ -126,11 +135,11 @@
+ 				samp->y = i->current_y;
+ 				samp->pressure = i->current_p;
+ 				samp->tv = ev.time;
+-	#ifdef DEBUG
++	// #ifdef DEBUG
+ 				fprintf(stderr, "RAW---------------------> %d %d %d %d.%d\n",
+ 						samp->x, samp->y, samp->pressure, samp->tv.tv_sec,
+ 						samp->tv.tv_usec);
+-	#endif		 /*DEBUG*/
++	// #endif		 /*DEBUG*/
+ 					samp++;
+ 				total++;
+ 				break;
+Index: plugins/Makefile.am
+===================================================================
+--- plugins/Makefile.am	(revision 52)
++++ plugins/Makefile.am	(working copy)
+@@ -85,6 +85,17 @@
+ TATUNG_MODULE =
+ endif
+ 
++if ENABLE_IDSV4_MODULE
++IDSV4_MODULE = idsv4.la
++else
++IDSV4_MODULE =
++endif
++
++if ENABLE_OFFSET_MODULE
++OFFSET_MODULE = offset.la
++else
++OFFSET_MODULE =
++endif
+ if ENABLE_INPUT_MODULE
+ INPUT_MODULE = input.la
+ else
+@@ -110,18 +121,23 @@
+ 	$(ARCTIC2_MODULE) \
+ 	$(TATUNG_MODULE) \
+ 	$(H2200_LINEAR_MODULE) \
+-	$(INPUT_MODULE)
++	$(INPUT_MODULE) \
++	$(OFFSET_MODULE) \
++	$(IDSV4_MODULE)
+   
+-variance_la_SOURCES	= variance.c
++variance_la_SOURCES	= variance.c ../src/ts_parse_vars.c
+ variance_la_LDFLAGS	= -module $(LTVSN)
+   
+ dejitter_la_SOURCES	= dejitter.c
+ dejitter_la_LDFLAGS	= -module $(LTVSN)
+   
+-linear_la_SOURCES	= linear.c
++linear_la_SOURCES	= linear.c ../src/ts_parse_vars.c
+ linear_la_LDFLAGS	= -module $(LTVSN)
+ 
+-pthres_la_SOURCES	= pthres.c
++offset_la_SOURCES	= offset.c ../src/ts_parse_vars.c
++offset_la_LDFLAGS	= -module $(LTVSN)
++
++pthres_la_SOURCES	= pthres.c ../src/ts_parse_vars.c
+ pthres_la_LDFLAGS	= -module $(LTVSN)
+ 
+ # hw access
+@@ -151,3 +167,6 @@
+ 
+ linear_h2200_la_SOURCES	= linear-h2200.c
+ linear_h2200_la_LDFLAGS	= -module $(LTVSN)
++
++idsv4_la_SOURCES	= idsv4-raw.c ../src/ts_parse_vars.c
++idsv4_la_LDFLAGS	= -module $(LTVSN)
+Index: plugins/mk712-raw.c
+===================================================================
+--- plugins/mk712-raw.c	(revision 52)
++++ plugins/mk712-raw.c	(working copy)
+@@ -14,6 +14,7 @@
+ 
+ static int mk712_read(struct tslib_module_info *inf, struct ts_sample *samp, int nr)
+ {
++    printf("mk712_read\n");
+ 	struct tsdev *ts = inf->dev;
+ 	struct mk712_ts_event *mk712_evt;
+ 	int ret;
+Index: src/ts_load_module.c
+===================================================================
+--- src/ts_load_module.c	(revision 52)
++++ src/ts_load_module.c	(working copy)
+@@ -42,9 +42,9 @@
+ 	strcat(fn, module);
+ 	strcat(fn, ".so");
+ 
+-#ifdef DEBUG
++//#ifdef DEBUG
+ 	printf ("Loading module %s\n", fn);
+-#endif
++//#endif
+ 	handle = dlopen(fn, RTLD_NOW);
+ 	if (!handle)
+ 		return -1;
+Index: configure.ac
+===================================================================
+--- configure.ac	(revision 52)
++++ configure.ac	(working copy)
+@@ -171,7 +171,24 @@
+         [input_module=yes])
+ AC_MSG_RESULT($input_module)
+ AM_CONDITIONAL(ENABLE_INPUT_MODULE, test "$input_module" = "yes")
++AC_MSG_CHECKING([whether idsv4 module is requested])
++AC_ARG_ENABLE(idsv4,
++        AS_HELP_STRING([--enable-idsv4],
++                [Enable building of idsv4(wacom) raw module (default=yes)]),
++        [idsv4_module=$enableval],
++        [idsv4_module=yes])
++AC_MSG_RESULT($idsv4_module)
++AM_CONDITIONAL(ENABLE_IDSV4_MODULE, test "$idsv4_module" = "yes")
+ 
++AC_MSG_CHECKING([whether offset module is requested])
++AC_ARG_ENABLE(offset,
++        AS_HELP_STRING([--enable-offset],
++                [Enable building of offset module (default=yes)]),
++        [offset_module=$enableval],
++        [offset_module=yes])
++AC_MSG_RESULT($offset_module)
++AM_CONDITIONAL(ENABLE_OFFSET_MODULE, test "$offset_module" = "yes")
++
+ AC_MSG_CHECKING([where to place modules])
+ AC_ARG_WITH(plugindir,
+         AS_HELP_STRING([--with-plugindir=ARG],
